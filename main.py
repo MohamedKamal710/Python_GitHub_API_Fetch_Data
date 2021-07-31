@@ -27,189 +27,11 @@ def executeInsert(query):
         return cursor.lastrowid
 
 
-def users():
-    res = requests.get(f'https://api.github.com/users',
-                           auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-    json = res.json()
-    print(json)
-    for user in json:
-        print(user)
-        login=user['login']
-        executeInsert(f'INSERT IGNORE INTO users VALUES ({user["id"]}, "{login}")')
-
-
-def followers():
-    res = executeSelect('select id,login from users')
-    for i in res:
-        username = i['login']
-        id = i['id']
-
-        res = requests.get(f'https://api.github.com/users/{username}',
-                           auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-        json = res.json()
-        print(json)
-        if 'followers' in json:
-            followers = json['followers']
-            print(followers)
-            executeInsert(f'UPDATE users SET followers = {followers} WHERE id = {id}')
-
-## Get repositories that realted to certain users.
-def repos():
-    res = executeSelect("""SELECT id, login FROM  users u;""")
-    for i in res:
-        username = i['login']
-        userId = i['id']
-        res2 = requests.get(f'https://api.github.com/users/{username}/repos?per_page=100',
-                           auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-        json = res2.json()
-        for repo in json:
-            repo_full_name=repo['full_name']
-            res3=requests.get(f'https://api.github.com/repos/{repo_full_name}/subscribers',
-                              auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-            watchers_json=res3.json()
-            w=len(watchers_json)
-            print(w)
-            print(watchers_json)
-            print(repo['watchers'])
-            forked_from = 0
-            if 'forked_from' in repo:
-                forked_from = repo['forked_from']
-            desc = repo['description']
-            if desc:
-                desc = desc.replace('\'', '')
-            insert = f"""INSERT IGNORE INTO `repos`
-            (`id`, `url`, `owner_id`, `name`, `description`, 
-            `language`, `created_at`, `forked_from`, `watchers`,`stars`,`forks_count`,`deleted`,
-             `updated_at`) 
-             VALUES ({repo['id']},'{repo['url']}' , {userId}, 
-                '{repo['name']}','{desc}','{repo['language']}' ,
-                '{repo['created_at']}', {forked_from}, {w}, {repo['stargazers_count']},{repo['forks']},0,'{repo['updated_at']}');"""
-            print(insert)
-            executeInsert(insert)
-
-
-## Get forked projects that are related to the repositories which will be extracted in the above method.
-def forks():
-    res = executeSelect("""SELECT u.id as userID,u.login,p.id,p.name FROM  users u
-    INNER JOIN repos p ON u.id = p.owner_id
-    ORDER BY `stars` DESC;""")
-    for i in res:
-        user_id=i['userID']
-        username = i['login']
-        repo_name = i['name']
-        repo_id = i['id']
-        print(repo_id)
-        res2 = requests.get(f'https://api.github.com/repos/{username}/{repo_name}/forks',
-                           auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-        json = res2.json()
-        print(json)
-        for repo in json:
-            repo_full_name = repo['full_name']
-            res3 = requests.get(f'https://api.github.com/repos/{repo_full_name}/subscribers',
-                                auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-            watchers_json = res3.json()
-            w = len(watchers_json)
-
-            res4 = requests.get(f'https://api.github.com/repos/{repo_full_name}/commits',
-                                auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-            commits_json = res4.json()
-            c= -1;
-            if('message' in commits_json):
-                c = len(commits_json)
-            desc=''
-            if desc in repo:
-                desc=connection.escape_string(repo['description'])
-            insert = f"""INSERT IGNORE INTO `forks`
-            (`id`, `url`, `owner_id`, `name`, `description`, 
-            `language`, `created_at`, `forked_from`, `watchers`,`stars`,`forks_count`, `deleted`,`num_of_commits`,
-             `updated_at`) 
-             VALUES ({repo['id']},'{repo['url']}' , {repo['owner']['id']}, 
-                '{repo['name']}','{desc}','{repo['language']}' ,
-                '{repo['created_at']}', {repo_id}, {w}, {repo['stargazers_count']},{repo['forks']},0,{c},'{repo['updated_at']}, {c}');"""
-            print(insert)
-            executeInsert(insert)
-
-## Get all pull requests that are related to the previous Forked projects and their forkees.
-def pull_request():
-    res = executeSelect("""SELECT u.id as userID,u.login,p.id,p.name FROM  users u
-        INNER JOIN repos p ON u.id = p.owner_id
-        ORDER BY `stars` DESC;""")
-    for i in res:
-        user_id = i['userID']
-        username = i['login']
-        repo_name = i['name']
-        # father id
-        repo_id = i['id']
-        print(repo_id)
-                                                # TO DO FROM HERE
-
-        res2 = requests.get(f'https://api.github.com/repos/{username}/{repo_name}/pulls',
-                            auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-        json = res2.json()
-        print(json)
-
-        for repo in json:
-            if(repo!="message" and repo!="block" and repo!="html_url" and len(repo)>30):
-                print(repo)
-                site=repo['commits_url']
-                res4 = requests.get(f'{site}',
-                        auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-                commits_json = res4.json()
-                c = len(commits_json)
-                desc = ''
-                head = -1;
-                if(repo['head']['repo'] is not None):
-                    head = repo['head']['repo']['id'];
-
-                base = -1;
-                if (repo['base']['repo'] is not None):
-                    base = repo['base']['repo']['id'];
-
-                if desc in repo:
-                    desc = connection.escape_string(repo['description'])
-                insert = f"""INSERT IGNORE INTO `pulls`
-                    (`id`, `url`, `owner_id`, `name`, `forked_from`, `num_of_commits`,`head_id`, `base_id`)
-                    VALUES ({repo['id']},'{repo['url']}' , {repo['user']['id']}, '{repo_name}', {repo_id}, {c}, {head} ,{base});"""
-                print(insert)
-                executeInsert(insert)
-## just a random test.
-def test():
-        username = "saymedia"
-        userId = 53830
-        res2 = requests.get(f'https://api.github.com/users/{username}/repos?per_page=100',
-                            auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-        json = res2.json()
-        print(json);
-        for repo in json:
-            repo_full_name = repo['full_name']
-            res3 = requests.get(f'https://api.github.com/repos/{repo_full_name}/subscribers',
-                                auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
-            watchers_json = res3.json()
-            w = len(watchers_json)
-            print(w)
-            print(watchers_json)
-            print(repo['watchers'])
-            forked_from = 0
-            if 'forked_from' in repo:
-                forked_from = repo['forked_from']
-            desc = repo['description']
-            if desc:
-                desc = desc.replace('\'', '')
-            insert = f"""INSERT IGNORE INTO `repos`
-            (`id`, `url`, `owner_id`, `name`, `description`, 
-            `language`, `created_at`, `forked_from`, `watchers`,`stars`,`forks_count`,`deleted`,
-             `updated_at`) 
-             VALUES ({repo['id']},'{repo['url']}' , {userId}, 
-                '{repo['name']}','{desc}','{repo['language']}' ,
-                '{repo['created_at']}', {forked_from}, {w}, {repo['stargazers_count']},{repo['forks']},0,'{repo['updated_at']}');"""
-
-
-
-
-
-## Get all valid repositories
-## In this method , we iterate through every repository and check it's url validity.
-## a valid url leads to inclusion of the repository in a format we desire.
+## Get all valid repositories with stars and watchers and forks count
+## In this method , we iterate through every repository and check its url validity.
+## a valid url leads to inclusion of the repository in a format we desire (Where we get Stars, Watchers and forks count).
+## @OriginalId is the id in the dataset (in case it is different that the id in the Github API)
+## @Originals as the original repository table
 def getRepos():
     res = executeSelect("""SELECT id, url FROM  originals;""")
     r = 0;
@@ -260,6 +82,8 @@ def getRepos():
 
 ## Get all forked projects .
 ## In this method we iterate through every repository to get their children and Insert them in a table in the database.
+## We include stars, watchers, and the commits count.
+# @repos as the source table of the repositories (Parents i.e. Forkees).
 def getForks():
     res = executeSelect("""SELECT id, url FROM  repos p where forks_count>0""")
     c = 0;
@@ -389,6 +213,7 @@ def getForks():
 
 
 ## Get all pull requests which are related to the forkees.
+## @repos as the repository table
 def getPullsFromParents():
 
     res = executeSelect("""SELECT r.id, r.url, r.name FROM  repos r
@@ -473,6 +298,7 @@ def getPullsFromParents():
 
 
 ## Retrieve all the pull requests which are related to the forked projects.
+## @Forks_ as the forks table
 def getPullsFromChildren():
 
     res = executeSelect("""SELECT f.id, f.url, f.name FROM  forks_ f;""")
@@ -566,6 +392,7 @@ def getPullsFromChildren():
                 executeInsert(insert)
 
 ## This method takes the forked projects in our database and returns them in a different format (different fields)
+## It validates and removes deleted forks, it Also adds stars, watchers and commits count.
 def updateForks():
     res = executeSelect("""SELECT id, url FROM  forks_;""")
     r = 0;
@@ -644,6 +471,179 @@ def updateForks():
                     flag = 0;
         except:
             continue
+
+#################################################################################################################################
+#################################################################################################################################
+## Functions that were used to get the dumped dataset, as for dataset 1 and dataset 2, we didn't use the following functions.
+def users():
+    res = requests.get(f'https://api.github.com/users',
+                           auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+    json = res.json()
+    print(json)
+    for user in json:
+        print(user)
+        login=user['login']
+        executeInsert(f'INSERT IGNORE INTO users VALUES ({user["id"]}, "{login}")')
+
+
+## Get repositories that are realted to certain users.
+def getReposFromUsers():
+    res = executeSelect("""SELECT id, login FROM  users u;""")
+    for i in res:
+        username = i['login']
+        userId = i['id']
+        res2 = requests.get(f'https://api.github.com/users/{username}/repos?per_page=100',
+                           auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+        json = res2.json()
+        for repo in json:
+            repo_full_name=repo['full_name']
+            res3=requests.get(f'https://api.github.com/repos/{repo_full_name}/subscribers',
+                              auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+            watchers_json=res3.json()
+            w=len(watchers_json)
+            print(w)
+            print(watchers_json)
+            print(repo['watchers'])
+            forked_from = 0
+            if 'forked_from' in repo:
+                forked_from = repo['forked_from']
+            desc = repo['description']
+            if desc:
+                desc = desc.replace('\'', '')
+            insert = f"""INSERT IGNORE INTO `repos`
+            (`id`, `url`, `owner_id`, `name`, `description`, 
+            `language`, `created_at`, `forked_from`, `watchers`,`stars`,`forks_count`,`deleted`,
+             `updated_at`) 
+             VALUES ({repo['id']},'{repo['url']}' , {userId}, 
+                '{repo['name']}','{desc}','{repo['language']}' ,
+                '{repo['created_at']}', {forked_from}, {w}, {repo['stargazers_count']},{repo['forks']},0,'{repo['updated_at']}');"""
+            print(insert)
+            executeInsert(insert)
+
+
+## Get forked projects that are related to the repositories which will be extracted in the above method.
+## Where the
+def GetForksFromRepos():
+    res = executeSelect("""SELECT u.id as userID,u.login,p.id,p.name FROM  users u
+    INNER JOIN repos p ON u.id = p.owner_id
+    ORDER BY `stars` DESC;""")
+    for i in res:
+        user_id=i['userID']
+        username = i['login']
+        repo_name = i['name']
+        repo_id = i['id']
+        print(repo_id)
+        res2 = requests.get(f'https://api.github.com/repos/{username}/{repo_name}/forks',
+                           auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+        json = res2.json()
+        print(json)
+        for repo in json:
+            repo_full_name = repo['full_name']
+            res3 = requests.get(f'https://api.github.com/repos/{repo_full_name}/subscribers',
+                                auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+            watchers_json = res3.json()
+            w = len(watchers_json)
+
+            res4 = requests.get(f'https://api.github.com/repos/{repo_full_name}/commits',
+                                auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+            commits_json = res4.json()
+            c= -1;
+            if('message' in commits_json):
+                c = len(commits_json)
+            desc=''
+            if desc in repo:
+                desc=connection.escape_string(repo['description'])
+            insert = f"""INSERT IGNORE INTO `forks`
+            (`id`, `url`, `owner_id`, `name`, `description`, 
+            `language`, `created_at`, `forked_from`, `watchers`,`stars`,`forks_count`, `deleted`,`num_of_commits`,
+             `updated_at`) 
+             VALUES ({repo['id']},'{repo['url']}' , {repo['owner']['id']}, 
+                '{repo['name']}','{desc}','{repo['language']}' ,
+                '{repo['created_at']}', {repo_id}, {w}, {repo['stargazers_count']},{repo['forks']},0,{c},'{repo['updated_at']}, {c}');"""
+            print(insert)
+            executeInsert(insert)
+
+## Get all pull requests that are related to the previous Forked projects and their forkees.
+def pull_request():
+    res = executeSelect("""SELECT u.id as userID,u.login,p.id,p.name FROM  users u
+        INNER JOIN repos p ON u.id = p.owner_id
+        ORDER BY `stars` DESC;""")
+    for i in res:
+        user_id = i['userID']
+        username = i['login']
+        repo_name = i['name']
+        # father id
+        repo_id = i['id']
+        print(repo_id)
+                                                # TO DO FROM HERE
+
+        res2 = requests.get(f'https://api.github.com/repos/{username}/{repo_name}/pulls',
+                            auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+        json = res2.json()
+        print(json)
+
+        for repo in json:
+            if(repo!="message" and repo!="block" and repo!="html_url" and len(repo)>30):
+                print(repo)
+                site=repo['commits_url']
+                res4 = requests.get(f'{site}',
+                        auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+                commits_json = res4.json()
+                c = len(commits_json)
+                desc = ''
+                head = -1;
+                if(repo['head']['repo'] is not None):
+                    head = repo['head']['repo']['id'];
+
+                base = -1;
+                if (repo['base']['repo'] is not None):
+                    base = repo['base']['repo']['id'];
+
+                if desc in repo:
+                    desc = connection.escape_string(repo['description'])
+                insert = f"""INSERT IGNORE INTO `pulls`
+                    (`id`, `url`, `owner_id`, `name`, `forked_from`, `num_of_commits`,`head_id`, `base_id`)
+                    VALUES ({repo['id']},'{repo['url']}' , {repo['user']['id']}, '{repo_name}', {repo_id}, {c}, {head} ,{base});"""
+                print(insert)
+                executeInsert(insert)
+
+
+## just a random test.
+def test():
+        username = "saymedia"
+        userId = 53830
+        res2 = requests.get(f'https://api.github.com/users/{username}/repos?per_page=100',
+                            auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+        json = res2.json()
+        print(json);
+        for repo in json:
+            repo_full_name = repo['full_name']
+            res3 = requests.get(f'https://api.github.com/repos/{repo_full_name}/subscribers',
+                                auth=HTTPBasicAuth('TypeYourGitHubNameHere', 'YourGithubToken'))
+            watchers_json = res3.json()
+            w = len(watchers_json)
+            print(w)
+            print(watchers_json)
+            print(repo['watchers'])
+            forked_from = 0
+            if 'forked_from' in repo:
+                forked_from = repo['forked_from']
+            desc = repo['description']
+            if desc:
+                desc = desc.replace('\'', '')
+            insert = f"""INSERT IGNORE INTO `repos`
+            (`id`, `url`, `owner_id`, `name`, `description`, 
+            `language`, `created_at`, `forked_from`, `watchers`,`stars`,`forks_count`,`deleted`,
+             `updated_at`) 
+             VALUES ({repo['id']},'{repo['url']}' , {userId}, 
+                '{repo['name']}','{desc}','{repo['language']}' ,
+                '{repo['created_at']}', {forked_from}, {w}, {repo['stargazers_count']},{repo['forks']},0,'{repo['updated_at']}');"""
+
+
+#################################################################################################################################
+#################################################################################################################################
+## Functions that were used to get the dumped dataset, as for dataset 1 and dataset 2, we didn't use the above functions.
+
 
 updateForks();
 
